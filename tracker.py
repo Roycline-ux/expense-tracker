@@ -1,30 +1,26 @@
-import json
-import os
+import sqlite3
 from datetime import date
 
-DATA_FILE = "expenses.json"
-
-expenses = []
+DB_FILE = "expenses.db"
 
 
-def load_expenses():
-    global expenses
-    if not os.path.exists(DATA_FILE):
-        return
-    try:
-        with open(DATA_FILE, "r") as f:
-            expenses = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        print("Could not read saved data. Starting fresh.")
-        expenses = []
+def get_connection():
+    return sqlite3.connect(DB_FILE)
 
 
-def save_expenses():
-    try:
-        with open(DATA_FILE, "w") as f:
-            json.dump(expenses, f, indent=2)
-    except OSError:
-        print("Warning: could not save your data.")
+def init_db():
+    with get_connection() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                amount REAL NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT,
+                date TEXT NOT NULL
+            )
+            """
+        )
 
 
 def show_menu():
@@ -49,85 +45,100 @@ def add_expense():
         except ValueError:
             print("Please enter a valid number.")
 
-    category = input("Category (e.g. food, transport): ").strip().lower()
+    category = input("Category (e.g. food, transport): ").strip().lower() or "other"
     description = input("Description: ").strip()
 
-    expense = {
-        "amount": amount,
-        "category": category or "other",
-        "description": description,
-        "date": str(date.today()),
-    }
-    expenses.append(expense)
-    save_expenses()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO expenses (amount, category, description, date) VALUES (?, ?, ?, ?)",
+            (amount, category, description, str(date.today())),
+        )
     print("Expense added and saved!")
 
 
 def view_expenses():
     print("\n--- All Expenses ---")
-    if not expenses:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, date, category, amount, description FROM expenses ORDER BY date, id"
+        ).fetchall()
+
+    if not rows:
         print("No expenses yet.")
         return
 
-    for i, e in enumerate(expenses, start=1):
-        print(f"{i}. {e['date']} | {e['category']:<10} | {e['amount']:>8.2f} | {e['description']}")
+    for row_id, d, category, amount, description in rows:
+        print(f"{row_id}. {d} | {category:<10} | {amount:>8.2f} | {description}")
 
 
 def view_summary():
     print("\n--- Summary ---")
-    if not expenses:
-        print("No expenses to summarize.")
-        return
+    with get_connection() as conn:
+        total, count = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM expenses"
+        ).fetchone()
 
-    total = sum(e["amount"] for e in expenses)
-    print(f"Total spent: {total:.2f}")
-    print(f"Number of expenses: {len(expenses)}")
+        if count == 0:
+            print("No expenses to summarize.")
+            return
 
-    category_totals = {}
-    for e in expenses:
-        cat = e["category"]
-        category_totals[cat] = category_totals.get(cat, 0) + e["amount"]
+        print(f"Total spent: {total:.2f}")
+        print(f"Number of expenses: {count}")
+
+        rows = conn.execute(
+            """
+            SELECT category, SUM(amount) AS cat_total
+            FROM expenses
+            GROUP BY category
+            ORDER BY cat_total DESC
+            """
+        ).fetchall()
 
     print("\nBy category:")
-    for cat, amount in sorted(category_totals.items(), key=lambda item: item[1], reverse=True):
-        percent = (amount / total) * 100
-        print(f"  {cat:<10} {amount:>8.2f}  ({percent:.1f}%)")
+    for category, cat_total in rows:
+        percent = (cat_total / total) * 100
+        print(f"  {category:<10} {cat_total:>8.2f}  ({percent:.1f}%)")
 
 
 def delete_expense():
     print("\n--- Delete Expense ---")
-    if not expenses:
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM expenses").fetchone()[0]
+    if count == 0:
         print("No expenses to delete.")
         return
 
     view_expenses()
 
-    choice = input("\nEnter the number to delete (or press Enter to cancel): ").strip()
+    choice = input("\nEnter the ID to delete (or press Enter to cancel): ").strip()
     if choice == "":
         print("Cancelled.")
         return
-
     if not choice.isdigit():
         print("Please enter a valid number.")
         return
 
-    index = int(choice) - 1
-    if index < 0 or index >= len(expenses):
-        print("That number is not in the list.")
-        return
+    expense_id = int(choice)
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT description, amount FROM expenses WHERE id = ?", (expense_id,)
+        ).fetchone()
 
-    e = expenses[index]
-    confirm = input(f"Delete '{e['description']}' ({e['amount']:.2f})? (y/n): ").strip().lower()
-    if confirm == "y":
-        expenses.pop(index)
-        save_expenses()
-        print("Expense deleted.")
-    else:
-        print("Cancelled.")
+        if row is None:
+            print("That ID is not in the list.")
+            return
+
+        description, amount = row
+        confirm = input(f"Delete '{description}' ({amount:.2f})? (y/n): ").strip().lower()
+        if confirm == "y":
+            conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+            print("Expense deleted.")
+        else:
+            print("Cancelled.")
 
 
 def main():
-    load_expenses()
+    init_db()
 
     while True:
         show_menu()
