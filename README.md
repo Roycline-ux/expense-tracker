@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Expense Tracker
 
 A simple command-line app to track personal spending, built with Python.
@@ -9,3 +10,7 @@ A simple command-line app to track personal spending, built with Python.
 
 ## How to run
     python tracker.py
+=======
+# expense-tracker
+just a start up
+>>>>>>> fe0649c28e38e8d23c6b02c47f74f7af3fc3299a
