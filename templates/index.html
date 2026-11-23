@@ -41,7 +41,7 @@
       color: var(--text);
       line-height: 1.5;
     }
-    .container { max-width: 820px; margin: 0 auto; padding: 24px 16px 48px; }
+    .container { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
     header { text-align: center; margin-bottom: 24px; }
     header h1 { margin: 0; font-size: 1.8rem; }
     header p { margin: 4px 0 0; color: var(--muted); }
@@ -68,7 +68,7 @@
       font-weight: 500;
     }
 
-    form.add { display: grid; grid-template-columns: 1fr 1fr 2fr auto; gap: 10px; }
+    form.add { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; }
     input {
       padding: 11px 12px;
       border: 1px solid var(--border);
@@ -96,6 +96,11 @@
     button.logout { background: transparent; color: var(--muted); padding: 4px 10px; font-weight: 500; }
     button.logout:hover { background: transparent; color: var(--text); }
 
+    a.edit { color: var(--primary); text-decoration: none; font-weight: 500; padding: 6px 10px; border-radius: 10px; }
+    a.edit:hover { background: rgba(79, 70, 229, 0.12); }
+    .actions { display: flex; align-items: center; gap: 4px; }
+    .actions form { margin: 0; }
+
     .cat-row { margin-bottom: 14px; }
     .cat-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 5px; }
     .cat-name { text-transform: capitalize; font-weight: 600; }
@@ -104,7 +109,7 @@
     .bar > span { display: block; height: 100%; background: var(--primary); border-radius: 99px; }
 
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    table { width: 100%; border-collapse: collapse; min-width: 560px; }
     th {
       text-align: left;
       font-size: 0.8rem;
@@ -143,7 +148,7 @@
   <div class="container">
     <header>
       <h1>💰 Expense Tracker</h1>
-      <p>Know where your money goes</p>
+      <p>Signed in as <strong>{{ g.user["username"] }}</strong></p>
       <form method="POST" action="{{ url_for('logout') }}" style="margin-top:10px;">
         <button type="submit" class="logout">Log out</button>
       </form>
@@ -164,6 +169,7 @@
       <h2>Add expense</h2>
       <form class="add" method="POST" action="{{ url_for('add') }}">
         <input type="number" name="amount" step="0.01" min="0.01" placeholder="Amount" required>
+        <input type="date" name="date" value="{{ today }}" max="{{ today }}" required>
         <input type="text" name="category" placeholder="Category">
         <input type="text" name="description" placeholder="Description">
         <button type="submit">Add</button>
@@ -214,10 +220,13 @@
                 <td class="amount">{{ "{:,.2f}".format(e["amount"]) }}</td>
                 <td>{{ e["description"] }}</td>
                 <td>
-                  <form method="POST" action="{{ url_for('delete', expense_id=e['id']) }}"
-                        onsubmit="return confirm('Delete this expense?');">
-                    <button class="del" type="submit">Delete</button>
-                  </form>
+                  <div class="actions">
+                    <a class="edit" href="{{ url_for('edit', expense_id=e['id']) }}">Edit</a>
+                    <form method="POST" action="{{ url_for('delete', expense_id=e['id']) }}"
+                          onsubmit="return confirm('Delete this expense?');">
+                      <button class="del" type="submit">Delete</button>
+                    </form>
+                  </div>
                 </td>
               </tr>
             {% endfor %}

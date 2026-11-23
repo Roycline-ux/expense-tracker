@@ -21,6 +21,17 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "expenses.db")
 
 
+def parse_date(text):
+    """Return a valid YYYY-MM-DD string that is not in the future, or None."""
+    try:
+        d = date.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    if d > date.today():
+        return None
+    return d.isoformat()
+
+
 def get_connection():
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
@@ -205,6 +216,7 @@ def index():
         total=total,
         categories=categories,
         chart_data=chart_data,
+        today=date.today().isoformat(),
     )
 
 
@@ -221,6 +233,11 @@ def add():
         flash("Amount must be greater than zero.")
         return redirect(url_for("index"))
 
+    expense_date = parse_date(request.form.get("date", ""))
+    if expense_date is None:
+        flash("Please enter a valid date (not in the future).")
+        return redirect(url_for("index"))
+
     category = request.form.get("category", "").strip().lower() or "other"
     description = request.form.get("description", "").strip()
 
@@ -228,10 +245,54 @@ def add():
         conn.execute(
             "INSERT INTO expenses (amount, category, description, date, user_id) "
             "VALUES (?, ?, ?, ?, ?)",
-            (amount, category, description, str(date.today()), g.user["id"]),
+            (amount, category, description, expense_date, g.user["id"]),
         )
     flash("Expense added!")
     return redirect(url_for("index"))
+
+
+@app.route("/edit/<int:expense_id>", methods=["GET", "POST"])
+@login_required
+def edit(expense_id):
+    with get_connection() as conn:
+        expense = conn.execute(
+            "SELECT * FROM expenses WHERE id = ? AND user_id = ?",
+            (expense_id, g.user["id"]),
+        ).fetchone()
+
+    if expense is None:
+        flash("Expense not found.")
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        try:
+            amount = float(request.form["amount"])
+        except (ValueError, KeyError):
+            flash("Please enter a valid amount.")
+            return redirect(url_for("edit", expense_id=expense_id))
+
+        if amount <= 0:
+            flash("Amount must be greater than zero.")
+            return redirect(url_for("edit", expense_id=expense_id))
+
+        expense_date = parse_date(request.form.get("date", ""))
+        if expense_date is None:
+            flash("Please enter a valid date (not in the future).")
+            return redirect(url_for("edit", expense_id=expense_id))
+
+        category = request.form.get("category", "").strip().lower() or "other"
+        description = request.form.get("description", "").strip()
+
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE expenses SET amount = ?, category = ?, description = ?, date = ? "
+                "WHERE id = ? AND user_id = ?",
+                (amount, category, description, expense_date, expense_id, g.user["id"]),
+            )
+        flash("Expense updated.")
+        return redirect(url_for("index"))
+
+    return render_template("edit.html", expense=expense, today=date.today().isoformat())
 
 
 @app.route("/delete/<int:expense_id>", methods=["POST"])

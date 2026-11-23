@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edit expense - Expense Tracker</title>
+  <style>
+    :root { --bg:#f3f5f9; --card:#fff; --text:#1d2433; --muted:#6b7385; --border:#e6e9f0; --primary:#4f46e5; --danger-bg:#fdecec; --danger:#b42318; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#111522; --card:#1a2033; --text:#e8ebf4; --muted:#98a0b5; --border:#2a3148; --primary:#818cf8; --danger-bg:#3a1c1e; --danger:#f0868a; }
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+           background:var(--bg); color:var(--text); padding:16px; }
+    .box { background:var(--card); border:1px solid var(--border); border-radius:14px;
+           padding:28px; width:100%; max-width:420px; box-shadow:0 2px 8px rgba(0,0,0,.05); }
+    h1 { margin:0 0 18px; font-size:1.4rem; text-align:center; }
+    label { display:block; font-size:.85rem; color:var(--muted); margin:0 0 4px; }
+    input { width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:10px;
+            background:var(--bg); color:var(--text); font-size:1rem; margin-bottom:14px; }
+    button { width:100%; padding:11px; border:none; border-radius:10px; background:var(--primary);
+             color:#fff; font-size:1rem; font-weight:600; cursor:pointer; }
+    .msg { background:var(--danger-bg); color:var(--danger); padding:10px 12px;
+           border-radius:10px; margin-bottom:14px; }
+    .alt { text-align:center; margin:14px 0 0; }
+    .alt a { color:var(--muted); text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Edit expense</h1>
+    {% with messages = get_flashed_messages() %}
+      {% for m in messages %}<div class="msg">{{ m }}</div>{% endfor %}
+    {% endwith %}
+    <form method="POST">
+      <label for="amount">Amount</label>
+      <input id="amount" type="number" name="amount" step="0.01" min="0.01" value="{{ expense['amount'] }}" required>
+
+      <label for="date">Date</label>
+      <input id="date" type="date" name="date" value="{{ expense['date'] }}" max="{{ today }}" required>
+
+      <label for="category">Category</label>
+      <input id="category" type="text" name="category" value="{{ expense['category'] }}">
+
+      <label for="description">Description</label>
+      <input id="description" type="text" name="description" value="{{ expense['description'] or '' }}">
+
+      <button type="submit">Save changes</button>
+    </form>
+    <p class="alt"><a href="{{ url_for('index') }}">Cancel</a></p>
+  </div>
+</body>
+</html>
