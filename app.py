@@ -65,6 +65,10 @@ def init_db():
             )
             """
         )
+        user_columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)")]
+        if "pw_version" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN pw_version INTEGER NOT NULL DEFAULT 0")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS expenses (
@@ -118,10 +122,13 @@ def load_user():
     user_id = session.get("user_id")
     if user_id is not None:
         with get_connection() as conn:
-            g.user = conn.execute(
-                "SELECT id, username FROM users WHERE id = ?", (user_id,)
+            row = conn.execute(
+                "SELECT id, username, pw_version FROM users WHERE id = ?", (user_id,)
             ).fetchone()
-        if g.user is None:
+        # A changed password bumps pw_version and invalidates older sessions
+        if row is not None and row["pw_version"] == session.get("pw_version", 0):
+            g.user = row
+        else:
             session.clear()
 
 
@@ -178,6 +185,7 @@ def register():
         else:
             session.clear()
             session["user_id"] = new_id
+            session["pw_version"] = 0
             return redirect(url_for("index"))
 
     return render_template("register.html", allow_registration=ALLOW_REGISTRATION)
@@ -191,13 +199,14 @@ def login():
 
         with get_connection() as conn:
             user = conn.execute(
-                "SELECT id, password_hash FROM users WHERE username = ?",
+                "SELECT id, password_hash, pw_version FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
 
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
             session["user_id"] = user["id"]
+            session["pw_version"] = user["pw_version"]
             return redirect(url_for("index"))
         flash("Wrong username or password.")
 
@@ -208,6 +217,49 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/account/password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        current = request.form.get("current", "")
+        new = request.form.get("new", "")
+        confirm = request.form.get("confirm", "")
+
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT password_hash, pw_version FROM users WHERE id = ?",
+                (g.user["id"],),
+            ).fetchone()
+
+        error = None
+        if not check_password_hash(row["password_hash"], current):
+            error = "Your current password is incorrect."
+        elif len(new) < 8:
+            error = "New password must be at least 8 characters."
+        elif new != confirm:
+            error = "New passwords do not match."
+        elif check_password_hash(row["password_hash"], new):
+            error = "New password must be different from the current one."
+
+        if error:
+            flash(error)
+            return redirect(url_for("change_password"))
+
+        new_version = row["pw_version"] + 1
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ?, pw_version = ? WHERE id = ?",
+                (generate_password_hash(new), new_version, g.user["id"]),
+            )
+
+        # Keep this device signed in; every other device is signed out
+        session["pw_version"] = new_version
+        flash("Password changed. Other devices have been signed out.")
+        return redirect(url_for("index"))
+
+    return render_template("change_password.html")
 
 
 def get_filters():

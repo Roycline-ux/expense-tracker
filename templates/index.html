@@ -205,9 +205,12 @@
     <header>
       <h1>💰 Expense Tracker</h1>
       <p>Signed in as <strong>{{ g.user["username"] }}</strong></p>
-      <form method="POST" action="{{ url_for('logout') }}" style="margin-top:10px;">
-        <button type="submit" class="logout">Log out</button>
-      </form>
+      <div style="margin-top:10px; display:flex; justify-content:center; align-items:center; gap:6px;">
+        <a class="clear" href="{{ url_for('change_password') }}">Change password</a>
+        <form method="POST" action="{{ url_for('logout') }}" style="margin:0;">
+          <button type="submit" class="logout">Log out</button>
+        </form>
+      </div>
     </header>
 
     {% with messages = get_flashed_messages() %}
