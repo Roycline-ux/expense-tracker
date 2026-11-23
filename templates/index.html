@@ -84,6 +84,7 @@
 
     form.add { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; }
     form.budget { display: grid; grid-template-columns: 2fr 1fr auto; gap: 10px; margin-top: 16px; }
+    form.recurring-form { display: grid; grid-template-columns: 1fr 1fr 1.5fr 1fr 1fr auto; gap: 10px; margin-top: 16px; }
     form.filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     input, select {
       padding: 11px 12px;
@@ -94,7 +95,8 @@
       font-size: 1rem;
       width: 100%;
     }
-    form.filter select { width: auto; min-width: 150px; flex: 1; }
+    form.filter select { width: auto; min-width: 140px; flex: 1; }
+    form.filter input[type="search"] { width: auto; min-width: 180px; flex: 2; }
     input:focus, select:focus { outline: 2px solid var(--primary); border-color: transparent; }
 
     button {
@@ -117,8 +119,21 @@
     a.edit:hover { background: rgba(79, 70, 229, 0.12); }
     a.clear { color: var(--muted); text-decoration: none; font-size: 0.9rem; padding: 6px 4px; }
     a.clear:hover { color: var(--text); }
+    a.export {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+    a.export:hover { background: rgba(79, 70, 229, 0.12); }
     .actions { display: flex; align-items: center; gap: 4px; }
     .actions form { margin: 0; }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .card-head h2 { margin: 0; }
 
     .cat-row { margin-bottom: 14px; }
     .cat-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 5px; gap: 8px; }
@@ -133,6 +148,20 @@
     .budget-del { display: inline; margin: 0; }
     .budget-del button { background: transparent; color: var(--muted); padding: 0 6px; font-size: 0.85rem; font-weight: 500; }
     .budget-del button:hover { background: transparent; color: var(--danger); }
+
+    .rec-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .rec-row:last-of-type { border-bottom: none; }
+    .rec-info { min-width: 0; }
+    .rec-title { font-weight: 600; }
+    .rec-sub { color: var(--muted); font-size: 0.88rem; }
+    .rec-row form { margin: 0; }
 
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; min-width: 560px; }
@@ -164,8 +193,8 @@
     .chart-box { position: relative; height: 260px; }
 
     @media (max-width: 640px) {
-      form.add, form.budget { grid-template-columns: 1fr; }
-      form.filter select { width: 100%; }
+      form.add, form.budget, form.recurring-form { grid-template-columns: 1fr; }
+      form.filter select, form.filter input[type="search"] { width: 100%; }
       .total { font-size: 2rem; }
       .charts { grid-template-columns: 1fr; }
     }
@@ -192,8 +221,9 @@
     {% endfor %}
 
     <div class="card">
-      <h2>Filter</h2>
+      <h2>Search and filter</h2>
       <form class="filter" method="GET" action="{{ url_for('index') }}">
+        <input type="search" name="q" value="{{ q }}" placeholder="Search descriptions" maxlength="100">
         <select name="month" onchange="this.form.submit()">
           <option value="">All months</option>
           {% for m in month_options %}
@@ -206,18 +236,18 @@
             <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c|capitalize }}</option>
           {% endfor %}
         </select>
-        {% if month or category %}
-          <a class="clear" href="{{ url_for('index') }}">Clear filters</a>
+        <button type="submit">Search</button>
+        {% if month or category or q %}
+          <a class="clear" href="{{ url_for('index') }}">Clear</a>
         {% endif %}
-        <noscript><button type="submit">Apply</button></noscript>
       </form>
     </div>
 
     <div class="card">
       <div class="total-label">
         Total spent
-        {% if month or category %}
-          (filtered{% if month %}: {{ month }}{% endif %}{% if category %}{% if month %}, {% else %}: {% endif %}{{ category }}{% endif %})
+        {% if month or category or q %}
+          (filtered{% if month %}: {{ month }}{% endif %}{% if category %}, {{ category }}{% endif %}{% if q %}, "{{ q }}"{% endif %})
         {% endif %}
       </div>
       <div class="total">{{ "{:,.2f}".format(total) }}</div>
@@ -232,6 +262,42 @@
         <input type="text" name="description" placeholder="Description">
         <button type="submit">Add</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Recurring expenses</h2>
+      {% if recurring %}
+        {% for r in recurring %}
+          <div class="rec-row">
+            <div class="rec-info">
+              <div class="rec-title">
+                {{ "{:,.2f}".format(r["amount"]) }}
+                <span class="tag">{{ r["category"] }}</span>
+                {% if r["description"] %}{{ r["description"] }}{% endif %}
+              </div>
+              <div class="rec-sub">Day {{ r["day"] }} of every month &middot; starts {{ r["start_date"] }}</div>
+            </div>
+            <form method="POST" action="{{ url_for('delete_recurring', recurring_id=r['id']) }}"
+                  onsubmit="return confirm('Stop this recurring expense? Past expenses are kept.');">
+              <button class="del" type="submit">Stop</button>
+            </form>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">No recurring expenses yet.</p>
+      {% endif %}
+
+      <form class="recurring-form" method="POST" action="{{ url_for('add_recurring') }}">
+        <input type="number" name="amount" step="0.01" min="0.01" placeholder="Amount" required>
+        <input type="text" name="category" placeholder="Category">
+        <input type="text" name="description" placeholder="Description">
+        <input type="number" name="day" min="1" max="28" placeholder="Day (1-28)" required>
+        <input type="date" name="start" value="{{ today }}" title="Start date" required>
+        <button type="submit">Add rule</button>
+      </form>
+      <p class="hint" style="margin-top:10px;">
+        Expenses are created on the chosen day each month, starting from the start date. Missed months are filled in when you open the app.
+      </p>
     </div>
 
     <div class="card">
@@ -300,7 +366,12 @@
     </div>
 
     <div class="card">
-      <h2>All expenses ({{ expenses|length }})</h2>
+      <div class="card-head">
+        <h2>All expenses ({{ expenses|length }})</h2>
+        {% if expenses %}
+          <a class="export" href="{{ url_for('export_csv', month=month, category=category, q=q) }}">Export CSV</a>
+        {% endif %}
+      </div>
       {% if expenses %}
         <div class="table-wrap">
           <table>
@@ -326,7 +397,7 @@
         </div>
       {% else %}
         <p class="empty">
-          {% if month or category %}No expenses match these filters.{% else %}No expenses yet. Add your first one above.{% endif %}
+          {% if month or category or q %}No expenses match your search or filters.{% else %}No expenses yet. Add your first one above.{% endif %}
         </p>
       {% endif %}
     </div>

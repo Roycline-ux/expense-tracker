@@ -1,3 +1,5 @@
+import csv
+import io
 import os
 import re
 import sqlite3
@@ -5,7 +7,7 @@ from datetime import date
 from functools import wraps
 from flask import (
     Flask, render_template, request, redirect,
-    url_for, flash, session, g,
+    url_for, flash, session, g, Response,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -31,6 +33,17 @@ def parse_date(text):
     except (ValueError, TypeError):
         return None
     if d > date.today():
+        return None
+    return d.isoformat()
+
+
+def parse_start_date(text):
+    """Like parse_date, but a future start date is allowed."""
+    try:
+        d = date.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+    if d.year < 2000:
         return None
     return d.isoformat()
 
@@ -79,6 +92,21 @@ def init_db():
                 category TEXT NOT NULL DEFAULT '',
                 amount REAL NOT NULL,
                 UNIQUE (user_id, category)
+            )
+            """
+        )
+        # last_month remembers the newest month already generated ('YYYY-MM')
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recurring (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                category TEXT NOT NULL,
+                description TEXT,
+                day INTEGER NOT NULL,
+                start_date TEXT NOT NULL,
+                last_month TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -182,6 +210,68 @@ def logout():
     return redirect(url_for("login"))
 
 
+def get_filters():
+    """Read the month, category and search text from the URL."""
+    month = request.args.get("month", "")
+    if not MONTH_RE.fullmatch(month):
+        month = ""
+    category = request.args.get("category", "").strip().lower()
+    q = request.args.get("q", "").strip()[:100]
+    return month, category, q
+
+
+def build_where(uid, month, category, q):
+    """Build a safe WHERE clause (values are passed as parameters)."""
+    where = "user_id = ?"
+    params = [uid]
+    if month:
+        where += " AND substr(date, 1, 7) = ?"
+        params.append(month)
+    if category:
+        where += " AND category = ?"
+        params.append(category)
+    if q:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        where += " AND description LIKE ? ESCAPE '\\'"
+        params.append(f"%{escaped}%")
+    return where, params
+
+
+def apply_recurring(conn, uid):
+    """Create any recurring expenses that are due and not yet created."""
+    today = date.today()
+    rules = conn.execute(
+        "SELECT * FROM recurring WHERE user_id = ?", (uid,)
+    ).fetchall()
+
+    for r in rules:
+        start = date.fromisoformat(r["start_date"])
+        last = r["last_month"]
+        y, m = start.year, start.month
+
+        while True:
+            due = date(y, m, r["day"])
+            if due > today:
+                break
+            ym = f"{y:04d}-{m:02d}"
+            if due >= start and ym > last:
+                conn.execute(
+                    "INSERT INTO expenses (amount, category, description, date, user_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (r["amount"], r["category"], r["description"], due.isoformat(), uid),
+                )
+                last = ym
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+
+        if last != r["last_month"]:
+            conn.execute(
+                "UPDATE recurring SET last_month = ? WHERE id = ?", (last, r["id"])
+            )
+
+
 def build_budget_status(conn, uid, this_month):
     """Compare this month's spending with each budget."""
     rows = conn.execute(
@@ -232,28 +322,14 @@ def index():
     today = date.today().isoformat()
     this_month = today[:7]
 
-    month = request.args.get("month", "")
-    if not MONTH_RE.fullmatch(month):
-        month = ""
-    category = request.args.get("category", "").strip().lower()
-
-    where = "user_id = ?"
-    params = [uid]
-    if month:
-        where += " AND substr(date, 1, 7) = ?"
-        params.append(month)
-    if category:
-        where += " AND category = ?"
-        params.append(category)
-
-    # The monthly chart ignores the month filter but keeps the category filter
-    chart_where = "user_id = ?"
-    chart_params = [uid]
-    if category:
-        chart_where += " AND category = ?"
-        chart_params.append(category)
+    month, category, q = get_filters()
+    where, params = build_where(uid, month, category, q)
+    # The monthly chart ignores the month filter but keeps category and search
+    chart_where, chart_params = build_where(uid, "", category, q)
 
     with get_connection() as conn:
+        apply_recurring(conn, uid)
+
         expenses = conn.execute(
             f"SELECT * FROM expenses WHERE {where} ORDER BY date DESC, id DESC",
             params,
@@ -297,6 +373,10 @@ def index():
             )
         ]
         budget_status = build_budget_status(conn, uid, this_month)
+        recurring = conn.execute(
+            "SELECT * FROM recurring WHERE user_id = ? ORDER BY day, id",
+            (uid,),
+        ).fetchall()
 
     alerts = []
     for b in budget_status:
@@ -328,11 +408,54 @@ def index():
         this_month=this_month,
         month=month,
         category=category,
+        q=q,
         month_options=month_options,
         category_options=category_options,
         budget_status=budget_status,
         alerts=alerts,
         warn_at=WARN_AT,
+        recurring=recurring,
+    )
+
+
+def csv_safe(value):
+    """Stop spreadsheet apps from running text that starts like a formula."""
+    text = "" if value is None else str(value)
+    if text and text[0] in "=+-@\t\r":
+        return "'" + text
+    return text
+
+
+@app.route("/export")
+@login_required
+def export_csv():
+    month, category, q = get_filters()
+    where, params = build_where(g.user["id"], month, category, q)
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT date, category, amount, description FROM expenses "
+            f"WHERE {where} ORDER BY date DESC, id DESC",
+            params,
+        ).fetchall()
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["Date", "Category", "Amount", "Description"])
+    for r in rows:
+        writer.writerow([
+            r["date"],
+            csv_safe(r["category"]),
+            f"{r['amount']:.2f}",
+            csv_safe(r["description"]),
+        ])
+
+    filename = f"expenses-{date.today().isoformat()}.csv"
+    # The leading BOM lets Excel read the file as UTF-8
+    return Response(
+        "\ufeff" + out.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -420,6 +543,59 @@ def delete(expense_id):
             (expense_id, g.user["id"]),
         )
     flash("Expense deleted.")
+    return redirect(url_for("index"))
+
+
+@app.route("/recurring", methods=["POST"])
+@login_required
+def add_recurring():
+    try:
+        amount = float(request.form["amount"])
+    except (ValueError, KeyError):
+        flash("Please enter a valid amount.")
+        return redirect(url_for("index"))
+
+    if amount <= 0:
+        flash("Amount must be greater than zero.")
+        return redirect(url_for("index"))
+
+    try:
+        day = int(request.form["day"])
+    except (ValueError, KeyError):
+        flash("Please enter a day of the month from 1 to 28.")
+        return redirect(url_for("index"))
+
+    if day < 1 or day > 28:
+        flash("Day must be between 1 and 28.")
+        return redirect(url_for("index"))
+
+    start = parse_start_date(request.form.get("start", ""))
+    if start is None:
+        flash("Please enter a valid start date.")
+        return redirect(url_for("index"))
+
+    category = request.form.get("category", "").strip().lower() or "other"
+    description = request.form.get("description", "").strip()
+
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO recurring (user_id, amount, category, description, day, start_date) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (g.user["id"], amount, category, description, day, start),
+        )
+    flash("Recurring expense saved. Due expenses are added automatically.")
+    return redirect(url_for("index"))
+
+
+@app.route("/recurring/delete/<int:recurring_id>", methods=["POST"])
+@login_required
+def delete_recurring(recurring_id):
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM recurring WHERE id = ? AND user_id = ?",
+            (recurring_id, g.user["id"]),
+        )
+    flash("Recurring expense stopped. Past expenses were kept.")
     return redirect(url_for("index"))
 
 
