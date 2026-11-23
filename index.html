@@ -134,11 +134,13 @@
 </head>
 <body>
   <div class="container">
-    <header>
+        <header>
       <h1>💰 Expense Tracker</h1>
       <p>Know where your money goes</p>
+      <form method="POST" action="{{ url_for('logout') }}" style="margin-top:10px;">
+        <button type="submit" style="background:transparent;color:var(--muted);padding:4px 10px;font-weight:500;">Log out</button>
+      </form>
     </header>
-
     {% with messages = get_flashed_messages() %}
       {% for m in messages %}
         <div class="msg">{{ m }}</div>

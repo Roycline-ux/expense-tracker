@@ -1,10 +1,17 @@
 import os
+import hmac
 import sqlite3
 from datetime import date
-from flask import Flask, render_template, request, redirect, url_for, flash
+from functools import wraps
+from flask import (
+    Flask, render_template, request, redirect,
+    url_for, flash, session,
+)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "changeme")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "expenses.db")
@@ -31,7 +38,34 @@ def init_db():
         )
 
 
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        if hmac.compare_digest(password.encode(), APP_PASSWORD.encode()):
+            session["logged_in"] = True
+            return redirect(url_for("index"))
+        flash("Wrong password.")
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/")
+@login_required
 def index():
     with get_connection() as conn:
         expenses = conn.execute(
@@ -58,6 +92,7 @@ def index():
 
 
 @app.route("/add", methods=["POST"])
+@login_required
 def add():
     try:
         amount = float(request.form["amount"])
@@ -82,6 +117,7 @@ def add():
 
 
 @app.route("/delete/<int:expense_id>", methods=["POST"])
+@login_required
 def delete(expense_id):
     with get_connection() as conn:
         conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
