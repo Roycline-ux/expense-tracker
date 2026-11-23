@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Expense Tracker</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 30px auto; padding: 0 15px; background: #f5f6fa; color: #222; }
+    h1 { text-align: center; }
+    .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .total { font-size: 28px; font-weight: bold; color: #2d7a3e; }
+    form.add { display: flex; gap: 10px; flex-wrap: wrap; }
+    input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 120px; }
+    button { padding: 8px 14px; border: none; border-radius: 4px; background: #3b6fd4; color: white; cursor: pointer; }
+    button.del { background: #d9534f; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+    .msg { background: #e8f4ea; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+  <h1>Expense Tracker</h1>
+
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}
+      <div class="msg">{{ m }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <div>Total spent</div>
+    <div class="total">{{ "%.2f"|format(total) }}</div>
+  </div>
+
+  <div class="card">
+    <h3>Add expense</h3>
+    <form class="add" method="POST" action="{{ url_for('add') }}">
+      <input type="number" name="amount" step="0.01" placeholder="Amount" required>
+      <input type="text" name="category" placeholder="Category">
+      <input type="text" name="description" placeholder="Description">
+      <button type="submit">Add</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>By category</h3>
+    {% if categories %}
+      <table>
+        {% for c in categories %}
+          <tr>
+            <td>{{ c["category"] }}</td>
+            <td>{{ "%.2f"|format(c["cat_total"]) }}</td>
+            <td>{{ "%.1f"|format(c["cat_total"] / total * 100) }}%</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No data yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>All expenses</h3>
+    {% if expenses %}
+      <table>
+        <tr><th>Date</th><th>Category</th><th>Amount</th><th>Description</th><th></th></tr>
+        {% for e in expenses %}
+          <tr>
+            <td>{{ e["date"] }}</td>
+            <td>{{ e["category"] }}</td>
+            <td>{{ "%.2f"|format(e["amount"]) }}</td>
+            <td>{{ e["description"] }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('delete', expense_id=e['id']) }}"
+                    onsubmit="return confirm('Delete this expense?');">
+                <button class="del" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No expenses yet.</p>
+    {% endif %}
+  </div>
+</body>
+</html>
