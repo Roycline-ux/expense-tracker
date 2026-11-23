@@ -82,12 +82,28 @@ def index():
             ORDER BY cat_total DESC
             """
         ).fetchall()
+        months = conn.execute(
+            """
+            SELECT substr(date, 1, 7) AS month, SUM(amount) AS month_total
+            FROM expenses
+            GROUP BY month
+            ORDER BY month
+            """
+        ).fetchall()
+
+    chart_data = {
+        "cat_labels": [c["category"] for c in categories],
+        "cat_values": [round(c["cat_total"], 2) for c in categories],
+        "month_labels": [m["month"] for m in months],
+        "month_values": [round(m["month_total"], 2) for m in months],
+    }
 
     return render_template(
         "index.html",
         expenses=expenses,
         total=total,
         categories=categories,
+        chart_data=chart_data,
     )
 
 
