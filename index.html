@@ -143,7 +143,7 @@
   <div class="container">
     <header>
       <h1>💰 Expense Tracker</h1>
-      <p>Know where your money goes</p>
+            <p>Signed in as <strong>{{ g.user["username"] }}</strong></p>
       <form method="POST" action="{{ url_for('logout') }}" style="margin-top:10px;">
         <button type="submit" class="logout">Log out</button>
       </form>

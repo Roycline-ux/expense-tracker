@@ -23,6 +23,8 @@
              color:#fff; font-size:1rem; font-weight:600; cursor:pointer; }
     .msg { background:var(--danger-bg); color:var(--danger); padding:10px 12px;
            border-radius:10px; margin-bottom:14px; }
+    .alt { text-align:center; margin:16px 0 0; color:var(--muted); font-size:.95rem; }
+    .alt a { color:var(--primary); font-weight:600; text-decoration:none; }
   </style>
 </head>
 <body>
@@ -33,9 +35,13 @@
       {% for m in messages %}<div class="msg">{{ m }}</div>{% endfor %}
     {% endwith %}
     <form method="POST">
-      <input type="password" name="password" placeholder="Password" autofocus required>
+      <input type="text" name="username" placeholder="Username" autofocus required>
+      <input type="password" name="password" placeholder="Password" required>
       <button type="submit">Sign in</button>
     </form>
+    {% if allow_registration %}
+      <p class="alt">No account? <a href="{{ url_for('register') }}">Create one</a></p>
+    {% endif %}
   </div>
 </body>
 </html>
