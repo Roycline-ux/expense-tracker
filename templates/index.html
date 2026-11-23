@@ -16,6 +16,11 @@
       --danger: #e5484d;
       --success-bg: #e7f6ec;
       --success-text: #1f7a3d;
+      --warn-bg: #fff4dc;
+      --warn-text: #8a5a00;
+      --warn: #f59e0b;
+      --over-bg: #fdecec;
+      --over-text: #b42318;
       --bar: #c7d2fe;
     }
     @media (prefers-color-scheme: dark) {
@@ -30,6 +35,11 @@
         --danger: #f0686c;
         --success-bg: #173826;
         --success-text: #7be0a1;
+        --warn-bg: #3a2e12;
+        --warn-text: #f5c76b;
+        --warn: #f59e0b;
+        --over-bg: #3a1c1e;
+        --over-text: #f0868a;
         --bar: #3b4270;
       }
     }
@@ -55,6 +65,7 @@
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     }
     .card h2 { margin: 0 0 14px; font-size: 1.05rem; }
+    .hint { color: var(--muted); font-size: 0.85rem; margin: 0 0 12px; }
 
     .total-label { color: var(--muted); font-size: 0.9rem; }
     .total { font-size: 2.4rem; font-weight: 700; color: var(--primary); }
@@ -67,9 +78,14 @@
       margin-bottom: 18px;
       font-weight: 500;
     }
+    .alert { padding: 12px 14px; border-radius: 10px; margin-bottom: 12px; font-weight: 500; }
+    .alert.warn { background: var(--warn-bg); color: var(--warn-text); }
+    .alert.over { background: var(--over-bg); color: var(--over-text); }
 
     form.add { display: grid; grid-template-columns: 1fr 1fr 1fr 2fr auto; gap: 10px; }
-    input {
+    form.budget { display: grid; grid-template-columns: 2fr 1fr auto; gap: 10px; margin-top: 16px; }
+    form.filter { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    input, select {
       padding: 11px 12px;
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -78,7 +94,8 @@
       font-size: 1rem;
       width: 100%;
     }
-    input:focus { outline: 2px solid var(--primary); border-color: transparent; }
+    form.filter select { width: auto; min-width: 150px; flex: 1; }
+    input:focus, select:focus { outline: 2px solid var(--primary); border-color: transparent; }
 
     button {
       padding: 11px 18px;
@@ -98,15 +115,24 @@
 
     a.edit { color: var(--primary); text-decoration: none; font-weight: 500; padding: 6px 10px; border-radius: 10px; }
     a.edit:hover { background: rgba(79, 70, 229, 0.12); }
+    a.clear { color: var(--muted); text-decoration: none; font-size: 0.9rem; padding: 6px 4px; }
+    a.clear:hover { color: var(--text); }
     .actions { display: flex; align-items: center; gap: 4px; }
     .actions form { margin: 0; }
 
     .cat-row { margin-bottom: 14px; }
-    .cat-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 5px; }
+    .cat-top { display: flex; justify-content: space-between; font-size: 0.95rem; margin-bottom: 5px; gap: 8px; }
     .cat-name { text-transform: capitalize; font-weight: 600; }
     .cat-meta { color: var(--muted); }
     .bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; }
     .bar > span { display: block; height: 100%; background: var(--primary); border-radius: 99px; }
+    .bar > span.warn { background: var(--warn); }
+    .bar > span.over { background: var(--danger); }
+    .cat-meta.warn { color: var(--warn-text); font-weight: 600; }
+    .cat-meta.over { color: var(--over-text); font-weight: 600; }
+    .budget-del { display: inline; margin: 0; }
+    .budget-del button { background: transparent; color: var(--muted); padding: 0 6px; font-size: 0.85rem; font-weight: 500; }
+    .budget-del button:hover { background: transparent; color: var(--danger); }
 
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; min-width: 560px; }
@@ -138,7 +164,8 @@
     .chart-box { position: relative; height: 260px; }
 
     @media (max-width: 640px) {
-      form.add { grid-template-columns: 1fr; }
+      form.add, form.budget { grid-template-columns: 1fr; }
+      form.filter select { width: 100%; }
       .total { font-size: 2rem; }
       .charts { grid-template-columns: 1fr; }
     }
@@ -160,8 +187,39 @@
       {% endfor %}
     {% endwith %}
 
+    {% for a in alerts %}
+      <div class="alert {{ a.level }}">{{ a.text }}</div>
+    {% endfor %}
+
     <div class="card">
-      <div class="total-label">Total spent</div>
+      <h2>Filter</h2>
+      <form class="filter" method="GET" action="{{ url_for('index') }}">
+        <select name="month" onchange="this.form.submit()">
+          <option value="">All months</option>
+          {% for m in month_options %}
+            <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+        <select name="category" onchange="this.form.submit()">
+          <option value="">All categories</option>
+          {% for c in category_options %}
+            <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c|capitalize }}</option>
+          {% endfor %}
+        </select>
+        {% if month or category %}
+          <a class="clear" href="{{ url_for('index') }}">Clear filters</a>
+        {% endif %}
+        <noscript><button type="submit">Apply</button></noscript>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="total-label">
+        Total spent
+        {% if month or category %}
+          (filtered{% if month %}: {{ month }}{% endif %}{% if category %}{% if month %}, {% else %}: {% endif %}{{ category }}{% endif %})
+        {% endif %}
+      </div>
       <div class="total">{{ "{:,.2f}".format(total) }}</div>
     </div>
 
@@ -174,6 +232,40 @@
         <input type="text" name="description" placeholder="Description">
         <button type="submit">Add</button>
       </form>
+    </div>
+
+    <div class="card">
+      <h2>Monthly budgets ({{ this_month }})</h2>
+      {% if budget_status %}
+        {% for b in budget_status %}
+          <div class="cat-row">
+            <div class="cat-top">
+              <span class="cat-name">{{ b.label }}</span>
+              <span class="cat-meta {{ b.level }}">
+                {{ "{:,.2f}".format(b.spent) }} of {{ "{:,.2f}".format(b.limit) }}
+                &middot; {{ "%.0f"|format(b.pct) }}%
+                {% if b.level == 'over' %}(over){% elif b.level == 'warn' %}(close){% endif %}
+                <form class="budget-del" method="POST" action="{{ url_for('delete_budget', budget_id=b.id) }}"
+                      onsubmit="return confirm('Remove this budget?');">
+                  <button type="submit" title="Remove budget">&#10005;</button>
+                </form>
+              </span>
+            </div>
+            <div class="bar"><span class="{{ b.level }}" style="width: {{ b.bar }}%"></span></div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p class="empty">No budgets yet. Set one below.</p>
+      {% endif %}
+
+      <form class="budget" method="POST" action="{{ url_for('set_budget') }}">
+        <input type="text" name="category" placeholder="Category (leave blank for overall)">
+        <input type="number" name="amount" step="0.01" min="0.01" placeholder="Monthly limit" required>
+        <button type="submit">Save budget</button>
+      </form>
+      <p class="hint" style="margin-top:10px;">
+        Setting a budget for a category that already has one updates it. You get a warning at {{ warn_at }}% and an alert when you go over.
+      </p>
     </div>
 
     {% if expenses %}
@@ -203,12 +295,12 @@
           </div>
         {% endfor %}
       {% else %}
-        <p class="empty">No data yet.</p>
+        <p class="empty">No data for this selection.</p>
       {% endif %}
     </div>
 
     <div class="card">
-      <h2>All expenses</h2>
+      <h2>All expenses ({{ expenses|length }})</h2>
       {% if expenses %}
         <div class="table-wrap">
           <table>
@@ -233,7 +325,9 @@
           </table>
         </div>
       {% else %}
-        <p class="empty">No expenses yet. Add your first one above.</p>
+        <p class="empty">
+          {% if month or category %}No expenses match these filters.{% else %}No expenses yet. Add your first one above.{% endif %}
+        </p>
       {% endif %}
     </div>
   </div>

@@ -16,6 +16,9 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 ALLOW_REGISTRATION = os.environ.get("ALLOW_REGISTRATION", "1") == "1"
 
 USERNAME_RE = re.compile(r"[A-Za-z0-9_]{3,30}")
+MONTH_RE = re.compile(r"\d{4}-\d{2}")
+
+WARN_AT = 80  # percent of budget that triggers a warning
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "expenses.db")
@@ -61,12 +64,23 @@ def init_db():
             )
             """
         )
-        # Upgrade an older expenses table that has no user_id column
         columns = [row["name"] for row in conn.execute("PRAGMA table_info(expenses)")]
         if "user_id" not in columns:
             conn.execute("ALTER TABLE expenses ADD COLUMN user_id INTEGER")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id)"
+        )
+        # category '' means the overall monthly budget
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budgets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                category TEXT NOT NULL DEFAULT '',
+                amount REAL NOT NULL,
+                UNIQUE (user_id, category)
+            )
+            """
         )
 
 
@@ -124,7 +138,6 @@ def register():
                     )
                     new_id = cur.lastrowid
                     if is_first:
-                        # The first account inherits any older expenses
                         conn.execute(
                             "UPDATE expenses SET user_id = ? WHERE user_id IS NULL",
                             (new_id,),
@@ -169,39 +182,134 @@ def logout():
     return redirect(url_for("login"))
 
 
+def build_budget_status(conn, uid, this_month):
+    """Compare this month's spending with each budget."""
+    rows = conn.execute(
+        """
+        SELECT category, SUM(amount) AS spent
+        FROM expenses
+        WHERE user_id = ? AND substr(date, 1, 7) = ?
+        GROUP BY category
+        """,
+        (uid, this_month),
+    ).fetchall()
+    spent_by_cat = {r["category"]: r["spent"] for r in rows}
+    overall_spent = sum(spent_by_cat.values())
+
+    budgets = conn.execute(
+        "SELECT * FROM budgets WHERE user_id = ? "
+        "ORDER BY (category = '') DESC, category",
+        (uid,),
+    ).fetchall()
+
+    status = []
+    for b in budgets:
+        spent = overall_spent if b["category"] == "" else spent_by_cat.get(b["category"], 0)
+        limit = b["amount"]
+        pct = spent / limit * 100 if limit else 0
+        if pct > 100:
+            level = "over"
+        elif pct >= WARN_AT:
+            level = "warn"
+        else:
+            level = "ok"
+        status.append({
+            "id": b["id"],
+            "label": b["category"] or "Overall",
+            "spent": spent,
+            "limit": limit,
+            "pct": pct,
+            "bar": min(pct, 100),
+            "level": level,
+        })
+    return status
+
+
 @app.route("/")
 @login_required
 def index():
     uid = g.user["id"]
+    today = date.today().isoformat()
+    this_month = today[:7]
+
+    month = request.args.get("month", "")
+    if not MONTH_RE.fullmatch(month):
+        month = ""
+    category = request.args.get("category", "").strip().lower()
+
+    where = "user_id = ?"
+    params = [uid]
+    if month:
+        where += " AND substr(date, 1, 7) = ?"
+        params.append(month)
+    if category:
+        where += " AND category = ?"
+        params.append(category)
+
+    # The monthly chart ignores the month filter but keeps the category filter
+    chart_where = "user_id = ?"
+    chart_params = [uid]
+    if category:
+        chart_where += " AND category = ?"
+        chart_params.append(category)
+
     with get_connection() as conn:
         expenses = conn.execute(
-            "SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC, id DESC",
-            (uid,),
+            f"SELECT * FROM expenses WHERE {where} ORDER BY date DESC, id DESC",
+            params,
         ).fetchall()
         total = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE user_id = ?",
-            (uid,),
+            f"SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE {where}",
+            params,
         ).fetchone()[0]
         categories = conn.execute(
-            """
+            f"""
             SELECT category, SUM(amount) AS cat_total
             FROM expenses
-            WHERE user_id = ?
+            WHERE {where}
             GROUP BY category
             ORDER BY cat_total DESC
             """,
-            (uid,),
+            params,
         ).fetchall()
         months = conn.execute(
-            """
+            f"""
             SELECT substr(date, 1, 7) AS month, SUM(amount) AS month_total
             FROM expenses
-            WHERE user_id = ?
+            WHERE {chart_where}
             GROUP BY month
             ORDER BY month
             """,
-            (uid,),
+            chart_params,
         ).fetchall()
+        month_options = [
+            r["m"] for r in conn.execute(
+                "SELECT DISTINCT substr(date, 1, 7) AS m FROM expenses "
+                "WHERE user_id = ? ORDER BY m DESC",
+                (uid,),
+            )
+        ]
+        category_options = [
+            r["category"] for r in conn.execute(
+                "SELECT DISTINCT category FROM expenses "
+                "WHERE user_id = ? ORDER BY category",
+                (uid,),
+            )
+        ]
+        budget_status = build_budget_status(conn, uid, this_month)
+
+    alerts = []
+    for b in budget_status:
+        if b["level"] == "over":
+            alerts.append({
+                "level": "over",
+                "text": f"Over budget: {b['label']} is at {b['spent']:,.2f} of {b['limit']:,.2f} this month.",
+            })
+        elif b["level"] == "warn":
+            alerts.append({
+                "level": "warn",
+                "text": f"Close to budget: {b['label']} has used {b['pct']:.0f}% ({b['spent']:,.2f} of {b['limit']:,.2f}).",
+            })
 
     chart_data = {
         "cat_labels": [c["category"] for c in categories],
@@ -216,7 +324,15 @@ def index():
         total=total,
         categories=categories,
         chart_data=chart_data,
-        today=date.today().isoformat(),
+        today=today,
+        this_month=this_month,
+        month=month,
+        category=category,
+        month_options=month_options,
+        category_options=category_options,
+        budget_status=budget_status,
+        alerts=alerts,
+        warn_at=WARN_AT,
     )
 
 
@@ -304,6 +420,45 @@ def delete(expense_id):
             (expense_id, g.user["id"]),
         )
     flash("Expense deleted.")
+    return redirect(url_for("index"))
+
+
+@app.route("/budget", methods=["POST"])
+@login_required
+def set_budget():
+    category = request.form.get("category", "").strip().lower()
+    try:
+        amount = float(request.form["amount"])
+    except (ValueError, KeyError):
+        flash("Please enter a valid budget amount.")
+        return redirect(url_for("index"))
+
+    if amount <= 0:
+        flash("Budget must be greater than zero.")
+        return redirect(url_for("index"))
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO budgets (user_id, category, amount)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, category) DO UPDATE SET amount = excluded.amount
+            """,
+            (g.user["id"], category, amount),
+        )
+    flash("Budget saved.")
+    return redirect(url_for("index"))
+
+
+@app.route("/budget/delete/<int:budget_id>", methods=["POST"])
+@login_required
+def delete_budget(budget_id):
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM budgets WHERE id = ? AND user_id = ?",
+            (budget_id, g.user["id"]),
+        )
+    flash("Budget removed.")
     return redirect(url_for("index"))
 
 
