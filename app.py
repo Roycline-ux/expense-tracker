@@ -1,11 +1,13 @@
+import os
 import sqlite3
 from datetime import date
 from flask import Flask, render_template, request, redirect, url_for, flash
 
 app = Flask(__name__)
-app.secret_key = "change-this-to-something-random"
+app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 
-DB_FILE = "expenses.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, "expenses.db")
 
 
 def get_connection():
@@ -87,6 +89,7 @@ def delete(expense_id):
     return redirect(url_for("index"))
 
 
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True)
